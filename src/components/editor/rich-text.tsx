@@ -17,7 +17,14 @@ export type RichTextHandle = {
   focusEnd: () => void;
   /** Splits the doc at the current cursor position, preserving marks. */
   splitAtCursor: () => { before: JSONContent; after: JSONContent };
-  /** Appends another block's doc content onto the end of this one. */
+  /**
+   * Appends another block's doc content onto the end of this one *and*
+   * pushes the merged doc into this editor's live document. Updating
+   * the `content` prop alone wouldn't do this — TipTap only reads
+   * `content` at construction time, not on every re-render — so a
+   * backspace-merge into an already-mounted block needs this rather
+   * than just updating React state.
+   */
   appendDoc: (doc: JSONContent) => JSONContent;
 };
 
@@ -179,10 +186,12 @@ export const RichText = forwardRef<
         current.content?.flatMap((n): JSONContent[] => n.content ?? []) ?? [];
       const otherInline: JSONContent[] =
         otherDoc.content?.flatMap((n): JSONContent[] => n.content ?? []) ?? [];
-      return {
+      const merged: JSONContent = {
         type: "doc",
         content: [{ type: "paragraph", content: [...currentInline, ...otherInline] }],
       };
+      editor?.commands.setContent(merged, { emitUpdate: false });
+      return merged;
     },
   }));
 

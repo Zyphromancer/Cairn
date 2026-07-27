@@ -32,13 +32,21 @@ export function BlockEditor({
 }) {
   const router = useRouter();
   const [blocks, setBlocks] = useState<BlockRow[]>(initialBlocks);
-  // Blocks present at mount came through SSR and need TipTap's deferred
+  // Only the very first paint (SSR + hydration) needs TipTap's deferred
   // (immediatelyRender: false) construction to avoid a hydration
-  // mismatch. Anything created afterward is pure client-side rendering
-  // with no server HTML to match, so it can render its editor view
-  // synchronously — see the `renderImmediately` prop on RichText.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally captured once, from the first render's props only
-  const initialBlockIds = useMemo(() => new Set(initialBlocks.map((b) => b.id)), []);
+  // mismatch. `hydrated` flips true on the next tick after mount — used
+  // as `renderImmediately` for every RichText below. This covers not
+  // just newly-created blocks but also existing ones that get remounted
+  // later (turning a block into a different type changes its wrapper
+  // JSX shape — e.g. plain vs. `<div className=...>` — which makes
+  // React unmount/remount RichText instead of reusing it; that remount
+  // happens well after hydration, so it's always safe to be immediate).
+  const [hydrated, setHydrated] = useState(false);
+  // The standard client-only-flag idiom (see React docs on hydration
+  // mismatches) — deliberately a bare setState so it fires as early as
+  // possible, one tick after mount.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setHydrated(true), []);
   const refs = useRef(new Map<string, RichTextHandle>());
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [slashMenu, setSlashMenu] = useState<{
@@ -327,6 +335,12 @@ export function BlockEditor({
     const content = { ...defaultContentFor(option.type), ...(option.level ? { level: option.level } : {}) };
     updateLocal(block.id, { type: option.type, content });
     callWithQueue("turnIntoBlock", [block.id, option.type, content]);
+    // Re-arm autoFocus for the converted block itself: many type changes
+    // (paragraph -> heading/list/todo/toggle/quote/callout) alter its
+    // wrapper JSX shape, which remounts RichText rather than reusing the
+    // instance, dropping focus. Harmless no-op if it wasn't remounted —
+    // autoFocus is a construction-time option TipTap only reads once.
+    setAutoFocusBlockId(block.id);
 
     if (option.type === "divider") {
       const newBlock = insertAfter({ ...block, type: "divider" }, "paragraph");
@@ -388,7 +402,7 @@ export function BlockEditor({
             linkedPage={linkedPage}
             members={members}
             autoFocus={block.id === autoFocusBlockId ? "start" : false}
-            renderImmediately={!initialBlockIds.has(block.id)}
+            renderImmediately={hydrated}
             slashMenuOpen={slashMenu?.blockId === block.id}
             onUpdate={(doc) => handleDocUpdate(block, doc)}
             onCodeChange={(text) => {
