@@ -73,3 +73,86 @@ neurodivergent layer, and shipping — is Phase 2 onward, not started yet.
 **What I need from you:** nothing blocking — I'll keep moving into
 Phase 2 (pages, sidebar, TipTap block editor) unless you want to redirect
 first.
+
+## Phase 2 — Pages & Editor ✅ (core scope; several block types deferred)
+
+**Built:**
+- Migration 2 (`00000000000002_pages_and_blocks.sql`): `pages` (nesting
+  via `parent_page_id`, trash via `archived_at`, `visibility`
+  private/workspace), `page_favorites` (per-user), `blocks` (nesting via
+  `parent_block_id`, free-text `type`, JSON `content`). Full RLS —
+  private pages are visible only to their creator, workspace pages to
+  any member; guests get read-only (can't insert/update/delete). An
+  atomic `create_workspace`-style pattern wasn't needed here since page
+  creators are already workspace members at insert time — no RLS
+  chicken-and-egg this time.
+- Sidebar: page tree with Favorites / Private / Workspace sections
+  (real RLS-backed Private, not a fake label), Trash with restore/purge,
+  collapsible nesting, drag-and-drop reorder and reparent (before/
+  after/inside drop zones).
+- Block editor: TipTap-based, one mini editor instance per block row
+  (not one shared ProseMirror doc — needed for per-block persistence,
+  and for later per-block comments/embeddings). Implemented: paragraph,
+  heading (h1–3), bulleted/numbered list, to-do, toggle, quote, callout,
+  divider, code, page_link, child_page. Slash menu (also searches
+  existing pages to link to), markdown-style flow is via slash menu
+  only for now (see deferred). Enter splits a block at the cursor
+  (preserving marks via ProseMirror slices); Backspace-at-start merges
+  into the previous block or deletes if empty; Tab/Shift+Tab
+  indent/outdent; drag-handle reorder; turn-into via slash menu;
+  @mentions (workspace members) via `@tiptap/extension-mention` +
+  `@tiptap/suggestion` with a tippy.js popup. Autosave debounced 500ms
+  for typing, immediate for structural changes (create/delete/move/
+  turn-into).
+- Dexie local-first layer, deliberately scoped down from "full
+  offline": a `pendingWrites` queue that intercepts fire-and-forget
+  mutations (content edits, moves, favorites, page property updates) —
+  tries the server call immediately, queues to IndexedDB on failure,
+  retries on reconnect/online event/30s interval. Creates
+  (createBlock/createPage) generate client-side UUIDs so they're safe
+  to queue too (no server round trip needed before the UI can use the
+  new id) — the one exception is createPage/createChildPage, which stay
+  direct/awaited since page ids drive an immediate navigation.
+
+**Three real bugs found and fixed by actually exercising the editor
+(not just reading the code), worth remembering for later phases:**
+1. Updating a block's `content` in React state does **not** push into
+   an already-mounted TipTap editor — `content` is a construction-time
+   seed only. Merging on Backspace or truncating on Enter-split needs
+   an explicit imperative `editor.commands.setContent(...)`
+   (`RichText`'s new `setContent`/`appendDoc` methods), or the live
+   editor silently shows stale text while React state says otherwise.
+2. Converting a block to a different type (e.g. paragraph → heading)
+   changes its wrapper JSX shape, which makes React unmount/remount the
+   `RichText` instance rather than reuse it — silently dropping focus.
+   Same thing happens when Tab/Shift+Tab moves a block into a different
+   parent's children array (a different array = a different React
+   parent = a remount, not a reorder). Fixed by re-arming an
+   `autoFocus` target after any such move/conversion, and by adding a
+   `hydrated` flag so any post-hydration (re)mount — new block or
+   existing-block remount alike — can render its TipTap view
+   synchronously instead of deferring, closing the focus-timing gap
+   entirely.
+3. A `flushSync`-based attempt at Enter's new-block focus timing made
+   things worse, not better — reverted. What actually fixed the
+   Enter-then-immediately-type race was making block creation fully
+   optimistic (client-generated UUID, synchronous local state update)
+   plus the `hydrated`-based immediate render, no `flushSync` needed.
+
+**Deferred (explicitly, not accidentally):**
+- Block types: image/video/audio/file (need a Storage upload pipeline),
+  bookmark/embed, table, columns, synced block, TOC, breadcrumb, button.
+- Markdown input rules (typing `# `, `- `, `1. `, `> `, `` ``` `` to
+  auto-convert) — only the slash menu converts block types right now.
+- Multi-block select (shift+click/shift+arrow range selection, bulk
+  delete/format/turn-into).
+- Full offline page/block *creation* while genuinely offline (client
+  UUIDs make this close, but createPage/createChildPage still need a
+  live round trip — see above).
+- Drag-and-drop for blocks only supports before/after/inside within the
+  loaded page; no cross-page drag.
+
+**What I need from you:** nothing blocking. Next up would be Phase 3
+(databases: properties, views, filters/sort, formulas, relations) unless
+you'd rather redirect — e.g. toward filling in some of the deferred
+block types first, since those come up constantly in real use.
