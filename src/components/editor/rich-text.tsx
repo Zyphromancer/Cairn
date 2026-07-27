@@ -2,7 +2,6 @@
 
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
 import Mention from "@tiptap/extension-mention";
 import { forwardRef, useImperativeHandle, useRef } from "react";
 import { createMentionSuggestion } from "./mention-suggestion";
@@ -28,7 +27,15 @@ export const RichText = forwardRef<
     content?: JSONContent;
     placeholder?: string;
     members: MentionItem[];
-    autoFocus?: boolean;
+    /**
+     * Passed straight through to TipTap's own `autofocus` construction
+     * option — not called imperatively after mount. With
+     * `immediatelyRender: false`, a brand-new editor's real ProseMirror
+     * view isn't constructed synchronously, so an imperative
+     * `ref.focusStart()` right after creating a block is a silent no-op;
+     * TipTap applies `autofocus` itself once the view actually exists.
+     */
+    autoFocus?: "start" | "end" | false;
     slashMenuOpen: boolean;
     onUpdate: (doc: JSONContent) => void;
     onEnter: () => void;
@@ -66,7 +73,7 @@ export const RichText = forwardRef<
   const editor = useEditor({
     immediatelyRender: false,
     content: content ?? emptyDoc(),
-    autofocus: autoFocus ? "end" : false,
+    autofocus: autoFocus ?? false,
     extensions: [
       StarterKit.configure({
         heading: false,
@@ -76,8 +83,8 @@ export const RichText = forwardRef<
         blockquote: false,
         codeBlock: false,
         horizontalRule: false,
+        link: { openOnClick: false },
       }),
-      Link.configure({ openOnClick: false }),
       Mention.configure({
         HTMLAttributes: { class: "text-accent" },
         suggestion: createMentionSuggestion(members, mentionActiveRef),
@@ -158,8 +165,10 @@ export const RichText = forwardRef<
     },
     appendDoc: (otherDoc) => {
       const current = editor?.getJSON() ?? emptyDoc();
-      const currentInline = current.content?.flatMap((n) => n.content ?? []) ?? [];
-      const otherInline = otherDoc.content?.flatMap((n) => n.content ?? []) ?? [];
+      const currentInline: JSONContent[] =
+        current.content?.flatMap((n): JSONContent[] => n.content ?? []) ?? [];
+      const otherInline: JSONContent[] =
+        otherDoc.content?.flatMap((n): JSONContent[] => n.content ?? []) ?? [];
       return {
         type: "doc",
         content: [{ type: "paragraph", content: [...currentInline, ...otherInline] }],

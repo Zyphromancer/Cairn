@@ -9,7 +9,6 @@ import { SlashMenu, filterSlashOptions, type SlashOption } from "./slash-menu";
 import type { MentionItem } from "./mention-list";
 import { type BlockContent, type BlockRow, type BlockType, defaultContentFor } from "@/lib/blocks/types";
 import { positionBetween } from "@/lib/blocks/position";
-import { createBlock, deleteBlock, turnIntoBlock } from "@/app/actions/blocks";
 import { createChildPage } from "@/app/actions/pages";
 import { callWithQueue } from "@/lib/local/sync-queue";
 import type { DropZone } from "@/components/sidebar/types";
@@ -40,14 +39,13 @@ export function BlockEditor({
     options: SlashOption[];
     selectedIndex: number;
   } | null>(null);
-  const pendingFocusRef = useRef<{ id: string; mode: "start" | "end" } | null>(null);
-  const [focusTick, setFocusTick] = useState(0);
+  // Focus for a block *created just now* is handled via the `autoFocus`
+  // prop (TipTap's own construction-time option — see rich-text.tsx for
+  // why an imperative ref.focusStart() right after creation doesn't
+  // work). Focus for an *already-mounted* block (arrow nav, backspace
+  // merge) uses the ref directly, synchronously, no state needed.
+  const [autoFocusBlockId, setAutoFocusBlockId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-
-  function requestFocus(id: string, mode: "start" | "end") {
-    pendingFocusRef.current = { id, mode };
-    setFocusTick((t) => t + 1);
-  }
 
   const pagesById = useMemo(() => {
     const map = new Map<string, WorkspacePage>();
@@ -55,25 +53,32 @@ export function BlockEditor({
     return map;
   }, [workspacePages]);
 
+  const hasRequestedInitialBlock = useRef(false);
   useEffect(() => {
-    if (blocks.length === 0) {
-      createBlock({ pageId, type: "paragraph", position: 0 }).then((b) =>
-        setBlocks([b as unknown as BlockRow]),
-      );
+    // Guarded against React StrictMode's double effect invocation in dev,
+    // which would otherwise create two empty first blocks.
+    if (blocks.length === 0 && !hasRequestedInitialBlock.current) {
+      hasRequestedInitialBlock.current = true;
+      const initialBlock: BlockRow = {
+        id: crypto.randomUUID(),
+        parent_block_id: null,
+        type: "paragraph",
+        content: defaultContentFor("paragraph"),
+        position: 0,
+      };
+      setBlocks([initialBlock]);
+      callWithQueue("createBlock", [
+        {
+          id: initialBlock.id,
+          pageId,
+          type: "paragraph",
+          position: 0,
+          content: initialBlock.content,
+        },
+      ]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const pending = pendingFocusRef.current;
-    if (!pending) return;
-    const handle = refs.current.get(pending.id);
-    if (handle) {
-      if (pending.mode === "start") handle.focusStart();
-      else handle.focusEnd();
-      pendingFocusRef.current = null;
-    }
-  }, [focusTick, blocks]);
 
   const childrenOf = useCallback(
     (parentId: string | null) =>
@@ -151,23 +156,38 @@ export function BlockEditor({
     scheduleContentSave(block.id, content);
   }
 
-  async function insertAfter(block: BlockRow, type: BlockType, content?: BlockContent) {
+  // Generates the new block's id on the client and adds it to local state
+  // synchronously (same tick) instead of waiting on a createBlock round
+  // trip. Enter needs to be able to focus the new block immediately —
+  // typing right after Enter would otherwise race the network and land
+  // in the old block while the new one doesn't exist yet.
+  function insertAfter(block: BlockRow, type: BlockType, content?: BlockContent): BlockRow {
     const siblings = childrenOf(block.parent_block_id);
     const idx = siblings.findIndex((b) => b.id === block.id);
     const after = siblings[idx + 1];
     const position = positionBetween(block.position, after?.position ?? null);
-    const newBlock = await createBlock({
-      pageId,
+    const newBlock: BlockRow = {
+      id: crypto.randomUUID(),
+      parent_block_id: block.parent_block_id,
       type,
+      content: content ?? defaultContentFor(type),
       position,
-      parentBlockId: block.parent_block_id,
-      content,
-    });
-    setBlocks((prev) => [...prev, newBlock as unknown as BlockRow]);
-    return newBlock as unknown as BlockRow;
+    };
+    setBlocks((prev) => [...prev, newBlock]);
+    callWithQueue("createBlock", [
+      {
+        id: newBlock.id,
+        pageId,
+        type,
+        position,
+        parentBlockId: block.parent_block_id,
+        content: newBlock.content,
+      },
+    ]);
+    return newBlock;
   }
 
-  async function handleEnter(block: BlockRow) {
+  function handleEnter(block: BlockRow) {
     const handle = refs.current.get(block.id);
     if (!handle) return;
     const { before, after } = handle.splitAtCursor();
@@ -179,11 +199,11 @@ export function BlockEditor({
     const nextType: BlockType = continuesType.includes(block.type) ? block.type : "paragraph";
     const nextContent = { ...defaultContentFor(nextType), doc: after };
 
-    const newBlock = await insertAfter(block, nextType, nextContent);
-    requestFocus(newBlock.id, "start");
+    const newBlock = insertAfter(block, nextType, nextContent);
+    setAutoFocusBlockId(newBlock.id);
   }
 
-  async function handleBackspaceAtStart(block: BlockRow) {
+  function handleBackspaceAtStart(block: BlockRow) {
     const idx = visibleOrder.findIndex((b) => b.id === block.id);
     const prev = idx > 0 ? visibleOrder[idx - 1] : null;
     if (!prev) return;
@@ -201,20 +221,22 @@ export function BlockEditor({
     }
 
     setBlocks((current) => current.filter((b) => b.id !== block.id));
-    deleteBlock(block.id);
-    requestFocus(prev.id, "end");
+    callWithQueue("deleteBlock", [block.id]);
+    // prev is already mounted, so focus it directly rather than going
+    // through the autoFocus (construction-time) mechanism.
+    prevHandle?.focusEnd();
   }
 
   function handleArrowUp(block: BlockRow) {
     const idx = visibleOrder.findIndex((b) => b.id === block.id);
     const prev = idx > 0 ? visibleOrder[idx - 1] : null;
-    if (prev) requestFocus(prev.id, "end");
+    if (prev) refs.current.get(prev.id)?.focusEnd();
   }
 
   function handleArrowDown(block: BlockRow) {
     const idx = visibleOrder.findIndex((b) => b.id === block.id);
     const next = idx >= 0 && idx < visibleOrder.length - 1 ? visibleOrder[idx + 1] : null;
-    if (next) requestFocus(next.id, "start");
+    if (next) refs.current.get(next.id)?.focusStart();
   }
 
   function handleIndent(block: BlockRow) {
@@ -280,15 +302,15 @@ export function BlockEditor({
       handle?.clearContent();
       const content = { pageId: option.pageId };
       updateLocal(block.id, { type: "page_link", content });
-      turnIntoBlock(block.id, "page_link", content);
-      const newBlock = await insertAfter({ ...block, type: "page_link" }, "paragraph");
-      requestFocus(newBlock.id, "start");
+      callWithQueue("turnIntoBlock", [block.id, "page_link", content]);
+      const newBlock = insertAfter({ ...block, type: "page_link" }, "paragraph");
+      setAutoFocusBlockId(newBlock.id);
       return;
     }
 
     if (option.type === "child_page") {
       setBlocks((current) => current.filter((b) => b.id !== block.id));
-      deleteBlock(block.id);
+      callWithQueue("deleteBlock", [block.id]);
       const page = await createChildPage({ pageId, workspaceId, blockPosition: block.position });
       router.push(`/w/${slug}/p/${page.id}`);
       return;
@@ -297,11 +319,11 @@ export function BlockEditor({
     handle?.clearContent();
     const content = { ...defaultContentFor(option.type), ...(option.level ? { level: option.level } : {}) };
     updateLocal(block.id, { type: option.type, content });
-    turnIntoBlock(block.id, option.type, content);
+    callWithQueue("turnIntoBlock", [block.id, option.type, content]);
 
     if (option.type === "divider") {
-      const newBlock = await insertAfter({ ...block, type: "divider" }, "paragraph");
-      requestFocus(newBlock.id, "start");
+      const newBlock = insertAfter({ ...block, type: "divider" }, "paragraph");
+      setAutoFocusBlockId(newBlock.id);
     }
   }
 
@@ -358,7 +380,7 @@ export function BlockEditor({
             slug={slug}
             linkedPage={linkedPage}
             members={members}
-            autoFocus={false}
+            autoFocus={block.id === autoFocusBlockId ? "start" : false}
             slashMenuOpen={slashMenu?.blockId === block.id}
             onUpdate={(doc) => handleDocUpdate(block, doc)}
             onCodeChange={(text) => {

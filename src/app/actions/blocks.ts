@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { type BlockContent, type BlockType, defaultContentFor } from "@/lib/blocks/types";
 
 export async function createBlock(params: {
+  id?: string;
   pageId: string;
   type: BlockType;
   position: number;
@@ -20,6 +21,7 @@ export async function createBlock(params: {
   const { data, error } = await supabase
     .from("blocks")
     .insert({
+      ...(params.id ? { id: params.id } : {}),
       page_id: params.pageId,
       parent_block_id: params.parentBlockId ?? null,
       type: params.type,

@@ -1,16 +1,27 @@
 "use client";
 
 import { localDB } from "./db";
-import { updateBlockContent, moveBlock } from "@/app/actions/blocks";
+import {
+  createBlock,
+  deleteBlock,
+  updateBlockContent,
+  moveBlock,
+  turnIntoBlock,
+} from "@/app/actions/blocks";
 import { updatePage, movePage, toggleFavorite, trashPage, restorePage } from "@/app/actions/pages";
 
 // Fire-and-forget mutations only: local state is already updated
 // optimistically before these are called, and nothing downstream needs
-// their return value (unlike createBlock/createPage, which hand back a
-// real id the UI needs immediately — those stay direct, un-queued calls;
-// true offline creation would need client-generated ids, deferred).
+// their return value. createBlock is safe to queue because block ids are
+// generated client-side (see block-editor.tsx's insertAfter) — the
+// caller never needs the server's response. createPage/createChildPage
+// still need a live round trip since page ids come from the server and
+// drive an immediate navigation.
 const registry = {
+  createBlock,
+  deleteBlock,
   updateBlockContent,
+  turnIntoBlock,
   moveBlock,
   updatePage,
   movePage,
