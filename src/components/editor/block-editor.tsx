@@ -32,6 +32,13 @@ export function BlockEditor({
 }) {
   const router = useRouter();
   const [blocks, setBlocks] = useState<BlockRow[]>(initialBlocks);
+  // Blocks present at mount came through SSR and need TipTap's deferred
+  // (immediatelyRender: false) construction to avoid a hydration
+  // mismatch. Anything created afterward is pure client-side rendering
+  // with no server HTML to match, so it can render its editor view
+  // synchronously — see the `renderImmediately` prop on RichText.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally captured once, from the first render's props only
+  const initialBlockIds = useMemo(() => new Set(initialBlocks.map((b) => b.id)), []);
   const refs = useRef(new Map<string, RichTextHandle>());
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [slashMenu, setSlashMenu] = useState<{
@@ -381,6 +388,7 @@ export function BlockEditor({
             linkedPage={linkedPage}
             members={members}
             autoFocus={block.id === autoFocusBlockId ? "start" : false}
+            renderImmediately={!initialBlockIds.has(block.id)}
             slashMenuOpen={slashMenu?.blockId === block.id}
             onUpdate={(doc) => handleDocUpdate(block, doc)}
             onCodeChange={(text) => {

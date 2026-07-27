@@ -36,6 +36,15 @@ export const RichText = forwardRef<
      * TipTap applies `autofocus` itself once the view actually exists.
      */
     autoFocus?: "start" | "end" | false;
+    /**
+     * True for blocks created client-side after the page already
+     * hydrated (never part of the server-rendered payload, so there's
+     * no SSR/hydration mismatch to guard against). Lets that editor's
+     * ProseMirror view construct synchronously on mount instead of
+     * deferring to an effect, which removes the one-tick window where
+     * `autoFocus` can't take effect yet.
+     */
+    renderImmediately?: boolean;
     slashMenuOpen: boolean;
     onUpdate: (doc: JSONContent) => void;
     onEnter: () => void;
@@ -53,6 +62,7 @@ export const RichText = forwardRef<
     placeholder,
     members,
     autoFocus,
+    renderImmediately,
     slashMenuOpen,
     onUpdate,
     onEnter,
@@ -71,7 +81,7 @@ export const RichText = forwardRef<
   const mentionActiveRef = useRef(false);
 
   const editor = useEditor({
-    immediatelyRender: false,
+    immediatelyRender: renderImmediately ?? false,
     content: content ?? emptyDoc(),
     autofocus: autoFocus ?? false,
     extensions: [

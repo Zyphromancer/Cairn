@@ -16,6 +16,7 @@ const HEADING_CLASS: Record<1 | 2 | 3, string> = {
 type RichTextForwardProps = {
   members: MentionItem[];
   autoFocus?: "start" | "end" | false;
+  renderImmediately?: boolean;
   slashMenuOpen: boolean;
   onUpdate: (doc: JSONContent) => void;
   onEnter: () => void;
