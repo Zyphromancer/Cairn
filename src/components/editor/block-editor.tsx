@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { JSONContent } from "@tiptap/react";
 import { BlockView } from "./block-view";
@@ -207,15 +206,8 @@ export function BlockEditor({
     const nextType: BlockType = continuesType.includes(block.type) ? block.type : "paragraph";
     const nextContent = { ...defaultContentFor(nextType), doc: after };
 
-    // flushSync forces the new block's DOM node (and its immediately-
-    // rendered, autofocused editor) to exist before this handler
-    // returns. Without it, React's default async commit leaves a brief
-    // window where a fast typist's next keystrokes can still land in
-    // the old block because the new one hasn't rendered yet.
-    flushSync(() => {
-      const newBlock = insertAfter(block, nextType, nextContent);
-      setAutoFocusBlockId(newBlock.id);
-    });
+    const newBlock = insertAfter(block, nextType, nextContent);
+    setAutoFocusBlockId(newBlock.id);
   }
 
   function handleBackspaceAtStart(block: BlockRow) {
@@ -318,10 +310,8 @@ export function BlockEditor({
       const content = { pageId: option.pageId };
       updateLocal(block.id, { type: "page_link", content });
       callWithQueue("turnIntoBlock", [block.id, "page_link", content]);
-      flushSync(() => {
-        const newBlock = insertAfter({ ...block, type: "page_link" }, "paragraph");
-        setAutoFocusBlockId(newBlock.id);
-      });
+      const newBlock = insertAfter({ ...block, type: "page_link" }, "paragraph");
+      setAutoFocusBlockId(newBlock.id);
       return;
     }
 
@@ -339,10 +329,8 @@ export function BlockEditor({
     callWithQueue("turnIntoBlock", [block.id, option.type, content]);
 
     if (option.type === "divider") {
-      flushSync(() => {
-        const newBlock = insertAfter({ ...block, type: "divider" }, "paragraph");
-        setAutoFocusBlockId(newBlock.id);
-      });
+      const newBlock = insertAfter({ ...block, type: "divider" }, "paragraph");
+      setAutoFocusBlockId(newBlock.id);
     }
   }
 
