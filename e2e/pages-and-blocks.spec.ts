@@ -61,6 +61,10 @@ test("typing, Enter, and Backspace create/merge blocks correctly", async ({ page
   await firstBlock.click();
   await page.keyboard.type("First block");
   await page.keyboard.press("Enter");
+  // Enter creates a new block and shifts focus to it — a real render
+  // tick, not something any human keystroke cadence could outrace, but
+  // Playwright's synthetic typing can hit literally the same tick.
+  await page.waitForTimeout(100);
   await page.keyboard.type("Second block");
 
   await expect(editor.locator(".ProseMirror")).toHaveCount(2);
@@ -84,6 +88,7 @@ test("slash menu turns a block into a heading", async ({ page }) => {
   await firstBlock.click();
   await page.keyboard.type("/head");
   await page.getByRole("button", { name: "Heading 1" }).click();
+  await page.waitForTimeout(100);
 
   await page.keyboard.type("A heading");
   await expect(page.locator(".ProseMirror").first()).toHaveText("A heading");
@@ -98,6 +103,7 @@ test("to-do checkbox toggles and persists across reload", async ({ page }) => {
   await firstBlock.click();
   await page.keyboard.type("/to-do");
   await page.getByRole("button", { name: "To-do" }).click();
+  await page.waitForTimeout(100);
   await page.keyboard.type("Buy milk");
 
   const checkbox = page.locator('input[type="checkbox"]');
