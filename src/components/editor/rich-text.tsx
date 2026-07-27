@@ -13,6 +13,14 @@ export type RichTextHandle = {
   getText: () => string;
   isEmpty: () => boolean;
   clearContent: () => void;
+  /**
+   * Pushes a doc into this editor's *live* document. Needed anywhere a
+   * block's content is recomputed programmatically (splitting on
+   * Enter, merging on Backspace) rather than typed — the `content`
+   * prop only seeds the editor once at construction, so updating React
+   * state alone leaves the already-mounted editor showing stale text.
+   */
+  setContent: (doc: JSONContent) => void;
   focusStart: () => void;
   focusEnd: () => void;
   /** Splits the doc at the current cursor position, preserving marks. */
@@ -167,6 +175,7 @@ export const RichText = forwardRef<
     getText: () => editor?.getText() ?? "",
     isEmpty: () => (editor?.getText() ?? "").length === 0,
     clearContent: () => editor?.commands.clearContent(),
+    setContent: (doc) => editor?.commands.setContent(doc, { emitUpdate: false }),
     focusStart: () => editor?.commands.focus("start"),
     focusEnd: () => editor?.commands.focus("end"),
     splitAtCursor: () => {

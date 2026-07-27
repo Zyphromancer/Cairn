@@ -54,12 +54,21 @@ export function BlockEditor({
     options: SlashOption[];
     selectedIndex: number;
   } | null>(null);
-  // Focus for a block *created just now* is handled via the `autoFocus`
-  // prop (TipTap's own construction-time option — see rich-text.tsx for
-  // why an imperative ref.focusStart() right after creation doesn't
-  // work). Focus for an *already-mounted* block (arrow nav, backspace
-  // merge) uses the ref directly, synchronously, no state needed.
-  const [autoFocusBlockId, setAutoFocusBlockId] = useState<string | null>(null);
+  // Focus for a block that just (re)mounted — newly created, or an
+  // existing block moved to a different React parent (indent/outdent
+  // move it between sibling arrays, which remounts rather than reuses
+  // the instance) — is handled via the `autoFocus` prop (TipTap's own
+  // construction-time option; see rich-text.tsx for why an imperative
+  // ref.focusStart() right after creation doesn't work). Focus for a
+  // block that's already mounted and staying put (arrow nav, backspace
+  // merge target) uses the ref directly instead, synchronously.
+  const [autoFocusTarget, setAutoFocusTarget] = useState<{
+    id: string;
+    mode: "start" | "end";
+  } | null>(null);
+  function requestAutoFocus(id: string, mode: "start" | "end" = "start") {
+    setAutoFocusTarget({ id, mode });
+  }
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const pagesById = useMemo(() => {
@@ -207,6 +216,7 @@ export function BlockEditor({
     if (!handle) return;
     const { before, after } = handle.splitAtCursor();
     const beforeContent = { ...block.content, doc: before };
+    handle.setContent(before);
     updateLocal(block.id, { content: beforeContent });
     flushContentSave(block.id, beforeContent);
 
@@ -215,7 +225,7 @@ export function BlockEditor({
     const nextContent = { ...defaultContentFor(nextType), doc: after };
 
     const newBlock = insertAfter(block, nextType, nextContent);
-    setAutoFocusBlockId(newBlock.id);
+    requestAutoFocus(newBlock.id, "start");
   }
 
   function handleBackspaceAtStart(block: BlockRow) {
@@ -266,6 +276,10 @@ export function BlockEditor({
     );
     updateLocal(block.id, { parent_block_id: newParent.id, position });
     callWithQueue("moveBlock", [block.id, { parentBlockId: newParent.id, position }]);
+    // Moving to a different parent's children array is a different React
+    // parent, so this remounts the block (loses focus/cursor) rather
+    // than reuse the instance — re-arm focus so the user can keep typing.
+    requestAutoFocus(block.id, "end");
   }
 
   function handleOutdent(block: BlockRow) {
@@ -278,6 +292,7 @@ export function BlockEditor({
     const position = positionBetween(parent.position, after?.position ?? null);
     updateLocal(block.id, { parent_block_id: parent.parent_block_id, position });
     callWithQueue("moveBlock", [block.id, { parentBlockId: parent.parent_block_id, position }]);
+    requestAutoFocus(block.id, "end");
   }
 
   function handleDrop(targetId: string, zone: DropZone) {
@@ -319,7 +334,7 @@ export function BlockEditor({
       updateLocal(block.id, { type: "page_link", content });
       callWithQueue("turnIntoBlock", [block.id, "page_link", content]);
       const newBlock = insertAfter({ ...block, type: "page_link" }, "paragraph");
-      setAutoFocusBlockId(newBlock.id);
+      requestAutoFocus(newBlock.id, "start");
       return;
     }
 
@@ -340,11 +355,11 @@ export function BlockEditor({
     // wrapper JSX shape, which remounts RichText rather than reusing the
     // instance, dropping focus. Harmless no-op if it wasn't remounted —
     // autoFocus is a construction-time option TipTap only reads once.
-    setAutoFocusBlockId(block.id);
+    requestAutoFocus(block.id, "start");
 
     if (option.type === "divider") {
       const newBlock = insertAfter({ ...block, type: "divider" }, "paragraph");
-      setAutoFocusBlockId(newBlock.id);
+      requestAutoFocus(newBlock.id, "start");
     }
   }
 
@@ -401,7 +416,7 @@ export function BlockEditor({
             slug={slug}
             linkedPage={linkedPage}
             members={members}
-            autoFocus={block.id === autoFocusBlockId ? "start" : false}
+            autoFocus={block.id === autoFocusTarget?.id ? autoFocusTarget.mode : false}
             renderImmediately={hydrated}
             slashMenuOpen={slashMenu?.blockId === block.id}
             onUpdate={(doc) => handleDocUpdate(block, doc)}
