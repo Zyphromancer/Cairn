@@ -50,6 +50,8 @@ test("creating a workspace adds the creator as owner", async ({ page }) => {
   await page.getByRole("button", { name: "Create" }).click();
 
   await expect(page).toHaveURL(/\/w\/test-workspace-/);
+  const slug = new URL(page.url()).pathname.split("/")[2];
+  await page.goto(`/w/${slug}/settings/members`);
   await expect(page.locator("select")).toHaveValue("owner");
   await expect(page.getByText(email).first()).toBeVisible();
 });
@@ -86,6 +88,8 @@ test("an owner can invite an existing user and change their role", async ({
   await page.getByPlaceholder("Acme Inc").fill("Invite Test Workspace");
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/\/w\/invite-test-workspace-/);
+  const slug = new URL(page.url()).pathname.split("/")[2];
+  await page.goto(`/w/${slug}/settings/members`);
 
   await page.getByPlaceholder("teammate@example.com").fill(memberEmail);
   await page.getByRole("button", { name: "Invite" }).click();
