@@ -156,3 +156,17 @@ first.
 (databases: properties, views, filters/sort, formulas, relations) unless
 you'd rather redirect — e.g. toward filling in some of the deferred
 block types first, since those come up constantly in real use.
+
+## Tooling — CI + pnpm
+
+- Switched the package manager from npm to pnpm (`packageManager` pinned
+  in `package.json`, `pnpm-lock.yaml` committed) so `pnpm install
+  --frozen-lockfile` works in CI.
+- Added a `typecheck` script (`tsc --noEmit`).
+- `.github/workflows/ci.yml`: install → typecheck → lint → build →
+  `supabase start` → Playwright, on every push and pull request. Node 20.
+  Playwright's HTML report uploads as a build artifact on failure.
+- `playwright.config.ts` now has a `webServer` block (`pnpm start`,
+  reused locally if already running, started fresh in CI) and no longer
+  hardcodes this sandbox's pre-installed Chromium path — CI installs its
+  own via `playwright install --with-deps chromium`.

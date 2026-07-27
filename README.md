@@ -18,13 +18,13 @@ per phase.
 
 ## Getting started
 
-Requires Docker (for local Supabase) and Node 20+.
+Requires Docker (for local Supabase), Node 20+, and pnpm.
 
 ```bash
-npm install
+pnpm install
 npx supabase start   # spins up local Postgres/Auth/Storage — prints local keys
 cp .env.example .env.local   # if not already present, fill in the printed keys
-npm run dev
+pnpm dev
 ```
 
 Open http://localhost:3000. Magic-link emails sent in local dev land in
@@ -34,13 +34,20 @@ Supabase Studio (browse tables, run SQL) is at http://127.0.0.1:54323.
 
 ### Useful commands
 
-- `npm run dev` — dev server
-- `npm run build` — production build
-- `npm run lint` — ESLint (includes the no-hardcoded-color rule)
-- `npm run test:e2e` — Playwright end-to-end suite (needs the dev server
-  and local Supabase running)
+- `pnpm dev` — dev server
+- `pnpm build` — production build
+- `pnpm typecheck` — `tsc --noEmit`
+- `pnpm lint` — ESLint (includes the no-hardcoded-color rule)
+- `pnpm test:e2e` — Playwright end-to-end suite (auto-starts the app via
+  `playwright.config.ts`'s `webServer`; needs local Supabase running)
 - `npx supabase db reset` — recreate the local DB from migrations
-- `npm run db:studio` — Drizzle Studio, for browsing via the typed schema
+- `pnpm db:studio` — Drizzle Studio, for browsing via the typed schema
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push and pull request: install,
+typecheck, lint, build, `supabase start`, then the Playwright suite. The
+HTML report is uploaded as a build artifact if the suite fails.
 
 ## Project layout
 
