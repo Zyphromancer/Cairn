@@ -52,7 +52,20 @@ test("typing, Enter, and Backspace create/merge blocks correctly", async ({ page
   for (let i = 0; i < "Second block".length + 5; i++) {
     await page.keyboard.press("ArrowLeft");
   }
-  await page.keyboard.press("Backspace");
+  // The same quirk can occasionally swallow the Backspace press itself
+  // (seen once in CI: cursor at 0, focus correct, yet no merge). Retry
+  // it — but only while the merge visibly hasn't happened, so a retry
+  // can never double-fire after a successful merge. If the cursor were
+  // somehow not at 0, an extra Backspace deletes a character and the
+  // final toHaveText assertion below still catches it.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.keyboard.press("Backspace");
+    const merged = await expect(editor.locator(".ProseMirror"))
+      .toHaveCount(1, { timeout: 2000 })
+      .then(() => true)
+      .catch(() => false);
+    if (merged) break;
+  }
 
   await expect(editor.locator(".ProseMirror")).toHaveCount(1);
   await expect(editor.locator(".ProseMirror").first()).toHaveText("First blockSecond block");
