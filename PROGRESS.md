@@ -142,8 +142,6 @@ first.
 **Deferred (explicitly, not accidentally):**
 - Block types: image/video/audio/file (need a Storage upload pipeline),
   bookmark/embed, table, columns, synced block, TOC, breadcrumb, button.
-- Markdown input rules (typing `# `, `- `, `1. `, `> `, `` ``` `` to
-  auto-convert) — only the slash menu converts block types right now.
 - Multi-block select (shift+click/shift+arrow range selection, bulk
   delete/format/turn-into).
 - Full offline page/block *creation* while genuinely offline (client
@@ -170,3 +168,39 @@ block types first, since those come up constantly in real use.
   reused locally if already running, started fresh in CI) and no longer
   hardcodes this sandbox's pre-installed Chromium path — CI installs its
   own via `playwright install --with-deps chromium`.
+
+## Phase 2 addendum — Markdown input rules ✅ (moved out of Deferred)
+
+Typing a trigger as the entire text of an empty paragraph block converts
+it in place and consumes the trigger: `# `/`## `/`### ` → h1–h3,
+`- `/`* ` → bulleted list, `1. ` → numbered list, `[] `/`[x] ` → to-do
+(unchecked/checked), `> ` → quote, `` ``` `` → code, `---` → divider
+(which also inserts and focuses a fresh paragraph after itself, since a
+divider isn't editable).
+
+Design notes:
+- Matching is against the block's *entire* plain text
+  (`src/lib/blocks/markdown-rules.ts`), not a cursor-anchored input rule —
+  which gives "only at position 0 of an otherwise empty block, never
+  mid-text" for free, and makes `#hashtag` (no trailing space) a
+  non-match by construction. Code blocks can't fire rules at all (they
+  don't route through the TipTap update path).
+- Cursor stays in the converted block via the same `requestAutoFocus`
+  remount fix as slash-menu conversions (a type change alters the
+  wrapper JSX, which remounts the editor instance).
+- Cmd/Ctrl+Z immediately after a conversion reverts it and restores the
+  literal trigger text. This is an app-level one-shot undo record, not
+  ProseMirror's history — the remount that comes with a type change
+  destroys the editor instance and its native undo stack, so the block
+  editor keeps a `lastConversion` record (invalidated the moment the
+  block is edited again) and intercepts the next undo keypress.
+- A real TipTap v3 gotcha found while wiring this: `clearContent()`
+  defaults to `emitUpdate: true`, which synchronously re-enters the
+  update handler with the emptied doc — scheduling a stale save and
+  clobbering the undo record. `RichText`'s `clearContent` now always
+  passes `false`; every caller clears as part of a larger app-level
+  change that manages its own persistence.
+- Playwright coverage: one test per trigger (11), a negative test that
+  `#hashtag` doesn't convert, and an undo-restores-the-text test —
+  `e2e/markdown-input-rules.spec.ts`, sharing a new `e2e/helpers.ts`
+  sign-in helper with the existing specs.

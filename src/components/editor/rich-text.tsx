@@ -70,6 +70,13 @@ export const RichText = forwardRef<
     onOutdent: () => void;
     onSlashQueryChange: (query: string | null) => void;
     onSlashKeyDown: (event: KeyboardEvent) => boolean;
+    /**
+     * Called on Cmd/Ctrl+Z before TipTap's own undo runs. Returns true if
+     * it handled the undo itself (reverting a just-applied markdown-rule
+     * conversion), in which case TipTap's native undo is skipped for this
+     * keypress. Returns false to fall through to normal undo behavior.
+     */
+    onUndoConversion: () => boolean;
   }
 >(function RichText(
   {
@@ -88,6 +95,7 @@ export const RichText = forwardRef<
     onOutdent,
     onSlashQueryChange,
     onSlashKeyDown,
+    onUndoConversion,
   },
   ref,
 ) {
@@ -129,6 +137,13 @@ export const RichText = forwardRef<
         }
 
         const { $from, empty } = view.state.selection;
+
+        if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+          if (onUndoConversion()) {
+            event.preventDefault();
+            return true;
+          }
+        }
 
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
@@ -174,7 +189,14 @@ export const RichText = forwardRef<
     getDoc: () => editor?.getJSON() ?? emptyDoc(),
     getText: () => editor?.getText() ?? "",
     isEmpty: () => (editor?.getText() ?? "").length === 0,
-    clearContent: () => editor?.commands.clearContent(),
+    // clearContent's emitUpdate defaults to *true* in TipTap v3 — left
+    // that way, clearing during a programmatic type conversion would
+    // synchronously re-enter onUpdate/handleDocUpdate with the emptied
+    // doc, scheduling a stale save and invalidating the one-shot
+    // conversion-undo record. Every caller here clears as part of a
+    // larger app-level state change that manages its own persistence,
+    // so silent is the only correct mode.
+    clearContent: () => editor?.commands.clearContent(false),
     setContent: (doc) => editor?.commands.setContent(doc, { emitUpdate: false }),
     focusStart: () => editor?.commands.focus("start"),
     focusEnd: () => editor?.commands.focus("end"),

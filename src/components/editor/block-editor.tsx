@@ -7,13 +7,35 @@ import { BlockView } from "./block-view";
 import type { RichTextHandle } from "./rich-text";
 import { SlashMenu, filterSlashOptions, type SlashOption } from "./slash-menu";
 import type { MentionItem } from "./mention-list";
-import { type BlockContent, type BlockRow, type BlockType, defaultContentFor } from "@/lib/blocks/types";
+import {
+  type BlockContent,
+  type BlockRow,
+  type BlockType,
+  defaultContentFor,
+  docToPlainText,
+} from "@/lib/blocks/types";
+import { matchMarkdownRule, type MarkdownRuleMatch } from "@/lib/blocks/markdown-rules";
 import { positionBetween } from "@/lib/blocks/position";
 import { createChildPage } from "@/app/actions/pages";
 import { callWithQueue } from "@/lib/local/sync-queue";
 import type { DropZone } from "@/components/sidebar/types";
 
 type WorkspacePage = { id: string; title: string; icon: string | null };
+
+// The most recent markdown-rule conversion, kept around just long enough
+// for a single Cmd/Ctrl+Z to revert it (see handleUndoConversion). Cleared
+// as soon as it's used, or as soon as the affected block is edited again —
+// block-type conversion isn't part of TipTap's own undo history (it's an
+// app-level change, not a ProseMirror doc change), so this is a one-shot
+// substitute rather than a real undo stack entry.
+type ConversionRecord = {
+  blockId: string;
+  prevType: BlockType;
+  prevContent: BlockContent;
+  // Set only for triggers (like "---") that also insert a trailing block
+  // on conversion — undo needs to remove it again.
+  extraBlockId?: string;
+};
 
 export function BlockEditor({
   pageId,
@@ -49,6 +71,7 @@ export function BlockEditor({
   useEffect(() => setHydrated(true), []);
   const refs = useRef(new Map<string, RichTextHandle>());
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const lastConversionRef = useRef<ConversionRecord | null>(null);
   const [slashMenu, setSlashMenu] = useState<{
     blockId: string;
     options: SlashOption[];
@@ -175,9 +198,75 @@ export function BlockEditor({
   }
 
   function handleDocUpdate(block: BlockRow, doc: JSONContent) {
+    // Any edit to a block invalidates a pending one-shot undo-conversion
+    // for *that* block — once the user keeps typing, Cmd+Z should mean
+    // "undo the typing" again, not "revert the earlier conversion".
+    if (lastConversionRef.current?.blockId === block.id) {
+      lastConversionRef.current = null;
+    }
+
     const content = { ...block.content, doc };
     updateLocal(block.id, { content });
+
+    // Markdown input rules only apply to plain paragraph blocks, and only
+    // when the trigger is the block's *entire* text — see markdown-rules.ts
+    // for why that's sufficient to guarantee "position 0 of an otherwise
+    // empty block, never mid-text". Code blocks never reach here at all
+    // (they use onCodeChange, not onUpdate/handleDocUpdate).
+    if (block.type === "paragraph") {
+      const match = matchMarkdownRule(docToPlainText(doc));
+      if (match) {
+        handleMarkdownRuleMatch(block, content, match);
+        return;
+      }
+    }
+
     scheduleContentSave(block.id, content);
+  }
+
+  function handleMarkdownRuleMatch(block: BlockRow, literalContent: BlockContent, match: MarkdownRuleMatch) {
+    const timers = saveTimers.current;
+    const existing = timers.get(block.id);
+    if (existing) {
+      clearTimeout(existing);
+      timers.delete(block.id);
+    }
+
+    const record: ConversionRecord = { blockId: block.id, prevType: block.type, prevContent: literalContent };
+    lastConversionRef.current = record;
+
+    refs.current.get(block.id)?.clearContent();
+
+    const newContent: BlockContent = {
+      ...defaultContentFor(match.type),
+      ...(match.type === "heading" ? { level: match.level } : {}),
+      ...(match.type === "to_do" ? { checked: match.checked } : {}),
+    };
+    updateLocal(block.id, { type: match.type, content: newContent });
+    callWithQueue("turnIntoBlock", [block.id, match.type, newContent]);
+    requestAutoFocus(block.id, "start");
+
+    if (match.type === "divider") {
+      const newBlock = insertAfter({ ...block, type: "divider" }, "paragraph");
+      requestAutoFocus(newBlock.id, "start");
+      record.extraBlockId = newBlock.id;
+    }
+  }
+
+  function handleUndoConversion(block: BlockRow): boolean {
+    const record = lastConversionRef.current;
+    if (!record || (record.blockId !== block.id && record.extraBlockId !== block.id)) return false;
+    lastConversionRef.current = null;
+
+    if (record.extraBlockId) {
+      setBlocks((current) => current.filter((b) => b.id !== record.extraBlockId));
+      callWithQueue("deleteBlock", [record.extraBlockId]);
+    }
+
+    updateLocal(record.blockId, { type: record.prevType, content: record.prevContent });
+    callWithQueue("turnIntoBlock", [record.blockId, record.prevType, record.prevContent]);
+    requestAutoFocus(record.blockId, "end");
+    return true;
   }
 
   // Generates the new block's id on the client and adds it to local state
@@ -439,6 +528,7 @@ export function BlockEditor({
               }
             }}
             onSlashKeyDown={(event) => handleSlashKeyDown(block, event)}
+            onUndoConversion={() => handleUndoConversion(block)}
             onToggleExpanded={() => {
               const content = { ...block.content, expanded: !(block.content.expanded !== false) };
               updateLocal(block.id, { content });

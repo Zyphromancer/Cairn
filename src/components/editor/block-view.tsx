@@ -27,6 +27,7 @@ type RichTextForwardProps = {
   onOutdent: () => void;
   onSlashQueryChange: (query: string | null) => void;
   onSlashKeyDown: (event: KeyboardEvent) => boolean;
+  onUndoConversion: () => boolean;
 };
 
 export const BlockView = forwardRef<
