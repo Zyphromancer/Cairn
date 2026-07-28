@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/*
+ * Every color/font/spacing value here is a `var(--cairn-*)` set at runtime
+ * by compileThemeToCssVariables() (see src/lib/theme/compile.ts) from the
+ * active ThemeToken. Nothing below is a literal color — that's enforced by
+ * eslint-plugin-local's no-hardcoded-color rule. Tailwind utilities like
+ * `bg-bg`, `text-text`, `text-accent` compile down to these variables.
+ */
+@theme inline {
+  --color-bg: var(--cairn-color-bg);
+  --color-surface: var(--cairn-color-surface);
+  --color-surface-alt: var(--cairn-color-surface-alt);
+  --color-text: var(--cairn-color-text);
+  --color-text-muted: var(--cairn-color-text-muted);
+  --color-accent: var(--cairn-color-accent);
+  --color-accent-muted: var(--cairn-color-accent-muted);
+  --color-border: var(--cairn-color-border);
+  --color-success: var(--cairn-color-success);
+  --color-warning: var(--cairn-color-warning);
+
+  --font-display: var(--font-display-family), sans-serif;
+  --font-body: var(--font-body-family), serif;
+  --font-mono: var(--font-mono-family), monospace;
+
+  --radius-cairn: var(--cairn-radius);
+  --spacing-block: var(--cairn-block-spacing);
+  --spacing-page: var(--cairn-page-padding);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--cairn-font-size-base);
+  line-height: var(--cairn-line-height);
+  letter-spacing: var(--cairn-letter-spacing);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
