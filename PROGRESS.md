@@ -204,3 +204,51 @@ Design notes:
   `#hashtag` doesn't convert, and an undo-restores-the-text test —
   `e2e/markdown-input-rules.spec.ts`, sharing a new `e2e/helpers.ts`
   sign-in helper with the existing specs.
+
+## Pre-Phase-3 addendum — Minimal installable PWA ✅
+
+- `src/app/manifest.ts`: name/short_name "Cairn", `display: "standalone"`,
+  `theme_color`/`background_color` pulled from the default theme preset
+  (`cairnDefaultTheme.colors.bg`) rather than a hardcoded hex, 192×192 and
+  512×512 icons (`public/icon-192.png`, `public/icon-512.png` — a simple
+  gold three-stone cairn glyph on the theme's near-black, generated via
+  `sharp` since there's no brand mark yet), plus a `purpose: "maskable"`
+  variant of the 512 icon.
+- `public/sw.js`: minimal app-shell service worker — precaches `/login`,
+  the manifest, and both icons on install; network-first for navigations
+  with a `/login` fallback when offline; cache-first for hashed
+  `/_next/static/` assets. No offline data sync (Dexie's queue already
+  covers pending writes at the app layer) — this is install-criteria
+  scope only, as asked.
+- `src/components/pwa/register-sw.tsx`: registers the service worker,
+  production-only (`NODE_ENV === "production"`) — a service worker
+  intercepting Turbopack's dev-only HMR/on-demand-compiled asset
+  requests causes far more confusion than it's worth, and install
+  criteria only matter for the deployed build anyway.
+- `layout.tsx` also sets `appleWebApp: { capable: true, ... }` metadata
+  (Safari doesn't fully respect the manifest's `display: standalone`;
+  this emits the `apple-mobile-web-app-*` tags Add to Home Screen needs
+  to launch iPad/iPhone without browser chrome) and a `viewport.themeColor`
+  matching the theme.
+
+**A real bug this caught:** the auth proxy's matcher excluded static
+image extensions but not `manifest.webmanifest` or `sw.js` — both got
+routed through `updateSession`, which redirected the *signed-out*
+fetch for the manifest itself to `/login`, since neither path was in
+`PUBLIC_PATHS`. That's fatal for installability: browsers (and the
+service worker) must be able to fetch the manifest and its icons with
+no session at all, including from `/login` before anyone's signed in.
+Fixed by excluding both from the proxy's matcher entirely (`src/proxy.ts`)
+rather than adding them to `PUBLIC_PATHS` — they need no auth-cookie
+handling whatsoever, unlike the two paths already there.
+
+**What's verified vs. what needs a manual check:** Playwright
+(`e2e/pwa.spec.ts`) confirms the manifest is linked and fetchable
+unauthenticated, has the right `display`/colors/icon sizes, and that the
+service worker registers, activates, and populates the shell cache —
+everything machine-checkable in headless Chromium. The actual install
+UI (Chrome/Edge's install icon, iPadOS's Add to Home Screen behavior)
+can't fire in headless automation or on a local, non-HTTPS origin
+(browsers require a secure context to consider a page installable) — it
+needs a manual check once this is deployed to a real HTTPS URL, which
+is the other pending pre-Phase-3 task.
