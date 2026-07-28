@@ -252,3 +252,80 @@ can't fire in headless automation or on a local, non-HTTPS origin
 (browsers require a secure context to consider a page installable) — it
 needs a manual check once this is deployed to a real HTTPS URL, which
 is the other pending pre-Phase-3 task.
+
+## Pre-Phase-3 addendum — Deploy ✅ (hosted Supabase + Vercel)
+
+- **Hosted Supabase**: project `cairn` (ref `bbtbiojnsvwoszybhevo`, region
+  `eu-west-1`, under the Athera Solutions org). Both migrations applied
+  and verified via `information_schema` (all six `public` tables present,
+  RLS intact). `supabase_migrations.schema_migrations` was seeded by hand
+  with both migration versions so a future `supabase link && supabase db
+  push` from a machine with real Postgres access recognizes them as
+  already applied instead of re-running them.
+- **Vercel**: project `cairn`, linked to `Zyphromancer/Cairn` with
+  `main` as the production branch (the Vercel-for-GitHub app was already
+  installed on this account from a prior project, so no manual OAuth
+  step was needed). All four `.env.example` vars set for
+  production/preview/development — `DATABASE_URL` points at the
+  pooled connection (`aws-0-eu-west-1.pooler.supabase.com:6543`,
+  transaction mode), not the direct one, since serverless functions need
+  pooling rather than long-lived connections.
+- **Supabase Auth config** updated: `site_url` and the redirect
+  allow-list now include the production domain (previously local-only),
+  so magic-link emails resolve correctly in production.
+- PR #1 was still a draft sitting on top of an unmerged `main` — deploying
+  literal `main` would've shipped an empty scaffold. Marked ready and
+  merged (squash) before deploying, per your call.
+
+**Two real bugs/gaps this caught:**
+1. **Vercel Deployment Protection (Vercel Authentication/SSO) is on by
+   default** for every project on this team, gating the `*.vercel.app`
+   domain behind a Vercel-account login wall. Left on, the app would
+   have been completely inaccessible to any real visitor. Disabled it
+   at the project level (`ssoProtection: null`).
+2. The Supabase CLI (`supabase link`/`db push`) is a Go binary that
+   doesn't honor this environment's HTTPS proxy — confirmed via the
+   proxy's own diagnostics (zero relay-failure records, meaning the
+   request never reached the proxy at all: a "hand-rolled Go dialer"
+   bypassing `HTTPS_PROXY` entirely). Worked around it correctly per the
+   proxy's own guidance (report/reroute, don't disable protections) by
+   driving the Supabase **Management API** directly over HTTPS instead
+   — including its `/database/query` endpoint, which executes arbitrary
+   SQL and let the migrations apply without ever needing a raw Postgres
+   connection (also not proxy-supported). `supabase link` itself is
+   still worth running from a machine with normal network access at
+   some point, purely so local tooling (`supabase db diff`, Studio
+   deep-links) recognizes the linked project — nothing about the app
+   depends on it.
+
+**Also found: headless Chromium in this sandbox cannot reach the public**
+**internet at all** (confirmed against `example.com`, not specific to
+this app) — every Playwright run all session had only ever hit
+`localhost`, which bypasses the proxy. So the literal "confirm in a
+browser" verification had to be done a different way: replayed the
+exact authenticated calls the app's own server actions make (the
+`create_workspace` RPC, then a `pages`/`blocks` insert under RLS) using
+a real session obtained via GoTrue's admin `generate_link`, then
+fetched the resulting page fresh over HTTP with that session's cookie —
+confirming the production Next.js deployment on real hosted Postgres
+renders exactly what was written, i.e. genuine persistence across a
+reload. All verification workspaces/pages/blocks/users were deleted
+afterward; production is clean.
+
+**What's verified:**
+- Deployed URL loads and returns the app shell (not the SSO wall).
+- Magic-link verify → session cookie → authenticated redirect works
+  end-to-end against the hosted project.
+- A workspace + page + block created via the real RLS-enforced path
+  persist and are correctly rendered on a fresh, independent fetch.
+
+**What still needs you, since I have no working browser here:**
+- The actual install-prompt UI from Task 2 (Chrome/Edge's install icon,
+  iPadOS's Add to Home Screen) — the manifest/service-worker mechanics
+  are Playwright-verified, but seeing the browser chrome itself needs a
+  real device.
+- A real magic-link click-through in your own inbox, as a sanity check
+  beyond the admin-API-generated one used above.
+- `supabase link --project-ref bbtbiojnsvwoszybhevo` from your own
+  machine, whenever convenient — not blocking, just nice for local
+  tooling to recognize the linked project.
